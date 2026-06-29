@@ -5,6 +5,9 @@
 
 ---
 
+## 手语数据集下载链接
+https://pan.baidu.com/s/10BGAt1WiM_jihU9MZD0ZQw?pwd=Y964 
+
 ## 项目功能
 
 - **离线特征提取**：使用 MediaPipe Hands 将每帧图像转换为关键点向量（最多双手，126 维/帧）。
