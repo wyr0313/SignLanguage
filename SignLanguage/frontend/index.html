@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>手语实时翻译（MediaPipe + Transformer）</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+        margin: 0;
+        background:
+          radial-gradient(circle at 16px 16px, rgba(196, 168, 122, 0.16) 2px, transparent 2px) 0 0/42px 42px,
+          #ece1c8;
+        color: #3d3428;
+      }
+      .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }
+      .card { background: #f3ecde; border: 1px solid #d4c6ab; border-radius: 14px; padding: 16px; box-shadow: 0 6px 16px rgba(79, 57, 26, 0.08); }
+      .camera-card { min-height: 500px; display: flex; flex-direction: column; }
+      h1 { font-size: 18px; margin: 0 0 12px; }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      button { background: linear-gradient(180deg, #4da7ff, #2e8ff5); color: #fff; border: 1px solid #3f90e0; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-weight: 600; box-shadow: 0 3px 8px rgba(46, 143, 245, 0.22); }
+      button.secondary { background: #8d949f; border-color: #868d97; box-shadow: none; }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+      input { background:#f7f2e8; border:1px solid #dbcfb7; border-radius:8px; color:#3d3428; padding:8px 10px; min-width:120px; }
+      video, canvas { width: 100%; border-radius: 12px; background: #d7d7d9; border: 1px solid #d0c2a8; }
+      .camera-card video { height: 320px; object-fit: cover; }
+      .camera-footnote { margin-top: auto !important; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .big { font-size: 28px; font-weight: 800; letter-spacing: .3px; }
+      .muted { color: #8e7f69; }
+      .badge { display:inline-block; padding: 4px 8px; border-radius: 999px; background: #f0e7d6; border: 1px solid #d8cab0; color:#77654c; }
+      .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .span-all { grid-column: 1 / -1; }
+      .figure-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .figure-box { background:#f8f4eb; border: 1px solid #daccb2; border-radius: 12px; padding: 10px; }
+      .figure-box img { width: 100%; border-radius: 8px; display: block; }
+      .figure-title { margin: 0 0 8px; font-size: 14px; color: #6c5b45; }
+      .self-check-result { margin-top:8px; white-space: pre-wrap; word-break: break-word; }
+      .spring-couplet {
+        position: fixed;
+        left: 16px;
+        top: 86px;
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        letter-spacing: 2px;
+        padding: 18px 10px;
+        border-radius: 14px;
+        border: 2px solid #b9892f;
+        background: linear-gradient(180deg, #b91616 0%, #8d0f0f 100%);
+        color: #f9e19d;
+        font-weight: 800;
+        font-size: 22px;
+        line-height: 1.25;
+        box-shadow: 0 8px 18px rgba(96, 28, 10, 0.3);
+        z-index: 5;
+        user-select: none;
+      }
+      @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+      @media (max-width: 900px) { .figure-grid { grid-template-columns: 1fr; } }
+      @media (max-width: 1200px) { .spring-couplet { display: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="spring-couplet">基于计算机视觉的手语实时翻译系统</div>
+    <div class="wrap">
+      <div class="card camera-card">
+        <h1>摄像头输入</h1>
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas" style="display:none;"></canvas>
+        <div class="row" style="margin-top: 12px;">
+          <button id="btnStart">开始</button>
+          <button id="btnStop" class="secondary" disabled>停止</button>
+          <span class="badge mono" id="status">未连接</span>
+          <span class="muted mono" id="fps">fps: -</span>
+        </div>
+        <div class="row camera-footnote" style="margin-top: 8px;">
+          <span class="muted">提示：请在良好光照下，将双手置于画面中。首次运行若提示“未加载模型”，请先离线训练。</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h1>实时翻译结果</h1>
+        <div class="big" id="text">—</div>
+        <div class="grid" style="margin-top: 10px;">
+          <div class="card" style="padding:12px; background:#f8f4eb;">
+            <div class="muted">置信度</div>
+            <div class="mono" id="conf">-</div>
+          </div>
+          <div class="card" style="padding:12px; background:#f8f4eb;">
+            <div class="muted">类别ID</div>
+            <div class="mono" id="classId">-</div>
+          </div>
+        </div>
+        <div class="card" style="margin-top: 10px; padding:12px; background:#f8f4eb;">
+          <div class="muted">Top-3 候选</div>
+          <div class="mono" id="top3" style="white-space: pre-wrap; word-break: break-word;">-</div>
+        </div>
+        <div class="card" style="margin-top: 10px; padding:12px; background:#f8f4eb;">
+          <div class="muted">后端消息</div>
+          <div class="mono" id="raw" style="white-space: pre-wrap; word-break: break-word;">-</div>
+        </div>
+        <div class="card" style="margin-top: 10px; padding:12px; background:#f8f4eb;">
+          <div class="muted">数据集样本自检（键盘 .mat）</div>
+          <div class="row" style="margin-top: 8px;">
+            <input id="checkClassId" class="mono" placeholder="类别编号（如 000000）" value="000000" />
+            <input id="checkSampleId" class="mono" placeholder="样本序号（如 1）" value="1" />
+            <button id="btnSelfCheck" class="secondary">自检该 .mat</button>
+          </div>
+          <div class="mono self-check-result" id="selfCheckResult">-</div>
+        </div>
+      </div>
+
+      <div class="card span-all">
+        <h1>模型与训练可视化</h1>
+        <div class="figure-grid">
+          <div class="figure-box">
+            <div class="figure-title">Transformer 模型结构</div>
+            <img src="/artifacts/figures/model_structure.png" alt="Transformer模型结构图" loading="lazy" />
+          </div>
+          <div class="figure-box">
+            <div class="figure-title">训练损失与准确率曲线</div>
+            <img src="/artifacts/figures/training_curves.png" alt="训练曲线图" loading="lazy" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const statusEl = document.getElementById("status");
+      const fpsEl = document.getElementById("fps");
+      const textEl = document.getElementById("text");
+      const confEl = document.getElementById("conf");
+      const classEl = document.getElementById("classId");
+      const top3El = document.getElementById("top3");
+      const rawEl = document.getElementById("raw");
+      const checkClassIdEl = document.getElementById("checkClassId");
+      const checkSampleIdEl = document.getElementById("checkSampleId");
+      const btnSelfCheck = document.getElementById("btnSelfCheck");
+      const selfCheckResultEl = document.getElementById("selfCheckResult");
+      const btnStart = document.getElementById("btnStart");
+      const btnStop = document.getElementById("btnStop");
+
+      let ws = null;
+      let stream = null;
+      let running = false;
+      let lastTs = performance.now();
+      let frames = 0;
+
+      function setStatus(s) { statusEl.textContent = s; }
+
+      async function startCamera() {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+      }
+
+      function stopCamera() {
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      }
+
+      function connectWS() {
+        const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+        ws = new WebSocket(url);
+        ws.onopen = () => setStatus("已连接");
+        ws.onclose = () => setStatus("已断开");
+        ws.onerror = () => setStatus("连接错误");
+        ws.onmessage = (ev) => {
+          rawEl.textContent = ev.data;
+          try {
+            const data = JSON.parse(ev.data);
+            if (data.ok) {
+              textEl.textContent = data.text ?? "—";
+              confEl.textContent = (data.confidence ?? 0).toFixed ? (data.confidence).toFixed(3) : String(data.confidence);
+              classEl.textContent = data.class_id ?? "-";
+              if (Array.isArray(data.top3) && data.top3.length > 0) {
+                const lines = data.top3.map((x, i) => {
+                  const conf = typeof x.confidence === "number" ? x.confidence.toFixed(3) : String(x.confidence ?? "-");
+                  return `${i + 1}. ${x.text ?? "-"} [${x.class_id ?? "-"}] 置信度=${conf}`;
+                });
+                top3El.textContent = lines.join("\n");
+              } else {
+                top3El.textContent = "-";
+              }
+            } else {
+              textEl.textContent = "—";
+              top3El.textContent = "-";
+            }
+          } catch {}
+        };
+      }
+
+      function sendFrame() {
+        if (!running || !ws || ws.readyState !== 1) return;
+        const w = 480;
+        const h = Math.round(w * (video.videoHeight / video.videoWidth));
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+        ws.send(JSON.stringify({ image: dataUrl }));
+      }
+
+      function loop() {
+        if (!running) return;
+        sendFrame();
+        frames += 1;
+        const now = performance.now();
+        if (now - lastTs >= 1000) {
+          const fps = frames * 1000 / (now - lastTs);
+          fpsEl.textContent = "fps: " + fps.toFixed(1);
+          frames = 0;
+          lastTs = now;
+        }
+        // 10fps 发送，平衡实时性与后端开销
+        setTimeout(loop, 100);
+      }
+
+      function fmtBool(v) {
+        return v ? "是" : "否";
+      }
+
+      async function runSelfCheck() {
+        const classId = (checkClassIdEl.value || "").trim();
+        const sampleId = (checkSampleIdEl.value || "").trim();
+        if (!classId || !sampleId) {
+          selfCheckResultEl.textContent = "请输入类别编号和样本序号";
+          return;
+        }
+
+        btnSelfCheck.disabled = true;
+        selfCheckResultEl.textContent = "检查中...";
+        try {
+          const url = `/api/dataset/self_check?class_id=${encodeURIComponent(classId)}&sample_id=${encodeURIComponent(sampleId)}`;
+          const resp = await fetch(url);
+          const data = await resp.json();
+          if (!resp.ok || !data.ok) {
+            selfCheckResultEl.textContent = `检查失败：${data.error || resp.statusText}`;
+            return;
+          }
+
+          const lines = [];
+          const word = data.class_word ? `（${data.class_word}）` : "";
+          lines.push(`类别: ${data.class_id} ${word}`);
+          lines.push(`样本: ${data.sample_mat_file}，存在: ${fmtBool(data.mat_exists)}`);
+          if (data.mat_exists) {
+            lines.push(`mat大小: ${data.mat_size_bytes} bytes`);
+          }
+          lines.push(
+            `类目录存在: depth=${fmtBool(data.class_dirs_exist.depth_mat)} | color=${fmtBool(data.class_dirs_exist.color_txt)} | joints=${fmtBool(data.class_dirs_exist.joints_txt)} | video=${fmtBool(data.class_dirs_exist.video_png)}`
+          );
+          lines.push(
+            `类样本计数: depth=${data.class_file_counts.depth_mat} | color=${data.class_file_counts.color_txt} | joints=${data.class_file_counts.joints_txt} | video_dirs=${data.class_file_counts.video_png_dirs}`
+          );
+          const c = data.candidate_multimodal_match || {};
+          lines.push(
+            `候选匹配: video=${c.video_png_dir || "-"} | color=${c.color_txt_file || "-"} | joints=${c.joints_txt_file || "-"}`
+          );
+          selfCheckResultEl.textContent = lines.join("\n");
+        } catch (e) {
+          selfCheckResultEl.textContent = `检查失败：${e}`;
+        } finally {
+          btnSelfCheck.disabled = false;
+        }
+      }
+
+      btnStart.onclick = async () => {
+        btnStart.disabled = true;
+        try {
+          await startCamera();
+          connectWS();
+          running = true;
+          btnStop.disabled = false;
+          loop();
+        } catch (e) {
+          setStatus("启动失败");
+          console.error(e);
+          btnStart.disabled = false;
+        }
+      };
+
+      btnStop.onclick = () => {
+        running = false;
+        btnStop.disabled = true;
+        btnStart.disabled = false;
+        if (ws) { ws.close(); ws = null; }
+        stopCamera();
+        setStatus("未连接");
+      };
+      btnSelfCheck.onclick = runSelfCheck;
+    </script>
+  </body>
+</html>
+
