@@ -1,0 +1,35 @@
+dataset:
+  root: data/SLR_dataset
+  dictionary: data/SLR_dataset/dictionary.txt
+
+features:
+  # MediaPipe Hands: 21 keypoints * (x,y,z) = 63 dims per frame
+  hand_keypoints: 21
+  dims_per_keypoint: 3
+  max_num_hands: 2
+  # If two hands detected, we concatenate (left + right). Missing hand is zero-filled.
+  per_frame_dim: 126
+
+train:
+  seed: 42
+  batch_size: 16
+  num_epochs: 50
+  lr: 0.0003
+  weight_decay: 0.01
+  num_workers: 0
+  max_seq_len: 128
+
+model:
+  d_model: 256
+  nhead: 8
+  num_layers: 4
+  dim_feedforward: 512
+  dropout: 0.1
+
+paths:
+  artifacts_dir: artifacts
+  mediapipe_models_dir: artifacts/mediapipe_models
+  hand_landmarker_task: artifacts/mediapipe_models/hand_landmarker.task
+  extracted_features_dir: artifacts/features_mediapipe
+  checkpoints_dir: artifacts/checkpoints
+  default_checkpoint: artifacts/checkpoints/best.pt
