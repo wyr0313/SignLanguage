@@ -7,6 +7,7 @@
 
 ## 手语数据集下载链接
 https://pan.baidu.com/s/10BGAt1WiM_jihU9MZD0ZQw?pwd=Y964 
+下载完成后，将对应文件放入项目文件夹正确位置
 
 ## 项目功能
 
